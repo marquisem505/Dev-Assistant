@@ -31,7 +31,7 @@ async def handle_join_request(join_request: types.ChatJoinRequest):
         reply_markup=keyboard
     )
 
-    await bot.approve_chat_join_request(chat_id=join_request.chat.id, user_id=user.id)
+#    await bot.approve_chat_join_request(chat_id=join_request.chat.id, user_id=user.id
 
 # DM-only /welcome handler
 @dp.message_handler(commands=["start"])
