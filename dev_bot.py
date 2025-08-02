@@ -31,6 +31,10 @@ MEMORY_PATH = "memory.json"
 LOG_PATH = "deploy_log.json"
 ERROR_LOG = "error_log.txt"
 BACKUP_DIR = "backups"
+
+# ✅ Ensure backups is a real folder
+if os.path.exists(BACKUP_DIR) and not os.path.isdir(BACKUP_DIR):
+    os.remove(BACKUP_DIR)  # Remove the file if it's not a directory
 if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
 
