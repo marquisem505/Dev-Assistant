@@ -1,4 +1,8 @@
 {
-  "nowbot": [],
-  "devbot": []
+  "nowbot": {
+    "history": []
+  },
+  "devbot": {
+    "history": []
+  }
 }
