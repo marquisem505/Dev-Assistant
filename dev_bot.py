@@ -29,13 +29,16 @@ repo_map = {
     },
     "devbot": {
         "repo_owner": "marquisem505",
-        "repo_name": "scams-plus-dev-bot",
+        "repo_name": "Dev-assistant",
         "target_file": "dev_bot.py",
-        "railway_url": "https://your-dev-railway-url.com"
+        "railway_url": "devbotassistant.up.railway.app"
     }
 }
 
-# === 🧠 GPT Ask ===
+# === Storage for Pending Changes ===
+pending_changes = {}
+
+# === 🔌 GPT for Code Updates ===
 async def ask_gpt(prompt: str) -> str:
     openai.api_key = OPENAI_API_KEY
     res = openai.chat.completions.create(
@@ -47,6 +50,27 @@ async def ask_gpt(prompt: str) -> str:
         ]
     )
     return res.choices[0].message.content
+
+# === 💬 GPT for Conversation ===
+async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔️ You’re not allowed to chat with me.")
+        return
+
+    await update.message.reply_text("🤔 Thinking...")
+
+    openai.api_key = OPENAI_API_KEY
+    res = openai.chat.completions.create(
+        model="gpt-4",
+        temperature=0.7,
+        messages=[
+            {"role": "system", "content": "You are a helpful and expert developer assistant. Answer clearly, concisely, and in plain English."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    reply = res.choices[0].message.content
+    await update.message.reply_text(reply[:4096])
 
 # === 📥 GitHub Get ===
 def get_file(owner, repo, filepath):
@@ -75,19 +99,8 @@ def deploy(railway_url):
     except:
         return False
 
-# === 🧠 Instruction Handler ===
-pending_changes = {}
-
-async def handle_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("⛔️ You're not allowed.")
-        return
-
-    text = update.message.text.strip()
-    if ":" not in text:
-        await update.message.reply_text("⚠️ Use format: `nowbot: your instruction here`")
-        return
-
+# === 🧠 Dev Instruction Mode ===
+async def handle_code_edit_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     target, prompt = text.split(":", 1)
     target = target.lower().strip()
     prompt = prompt.strip()
@@ -164,14 +177,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
+# === 🔀 Unified Router for All Text ===
+async def main_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔️ Unauthorized.")
+        return
+
+    text = update.message.text.strip()
+
+    if ":" in text and text.split(":")[0].lower() in repo_map:
+        await handle_code_edit_instruction(update, context, text)
+    else:
+        await handle_conversation(update, context, text)
+
 # === 🔔 Hello Command ===
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Dev Assistant ready to write code on command.")
+    await update.message.reply_text("👋 Dev Assistant ready to write code *or* chat like GPT.")
 
 # === ▶️ Start Bot ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("hello", hello))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instruction))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_router))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.run_polling()
