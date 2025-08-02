@@ -16,12 +16,12 @@ bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # 👋 Handle new members joining the group
-@dp.my_chat_member_handler()
-async def handle_new_member(event: types.ChatMemberUpdated):
-    if event.chat.id == FREE_GROUP_ID and event.new_chat_member.status == "member":
-        user = event.new_chat_member.user
+@dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
+async def on_user_joined(message: types.Message):
+    if message.chat.id != FREE_GROUP_ID:
+        return
 
-        # Inline button to redirect to the /start link
+    for user in message.new_chat_members:
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
             InlineKeyboardButton(
@@ -29,15 +29,13 @@ async def handle_new_member(event: types.ChatMemberUpdated):
                 url="https://t.me/ScamsClub_Bot?start=welcome"
             )
         )
-
         welcome_text = (
             f"👋 Welcome <b>{user.full_name}</b> to <b>Scam’s Club 🏪</b>\n\n"
             "We share simulations of tools, walkthroughs, and methods (for educational use only).\n\n"
             "🔒 Want full access to Scam’s Club Plus?\n"
             "Click below to get started:"
         )
-
-        await bot.send_message(chat_id=event.chat.id, text=welcome_text, reply_markup=keyboard)
+        await message.answer(welcome_text, reply_markup=keyboard)
 
 # 💬 Handle /welcome command in private DM
 @dp.message_handler(commands=["welcome"])
