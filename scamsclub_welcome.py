@@ -34,19 +34,20 @@ async def handle_join_request(join_request: types.ChatJoinRequest):
     await bot.approve_chat_join_request(chat_id=join_request.chat.id, user_id=user.id)
 
 # DM-only /welcome handler
-@dp.message_handler(commands=["welcome"])
-async def welcome_dm(message: types.Message):
-    await message.answer(
-        "👋 Thanks for joining Scam’s Club Store 🏪\n\n"
-        "You now have access to:\n"
-        "📚 /methods – Explore simulated guides\n"
-        "🛠 /tools – OTP bots, spoofers, etc.\n"
-        "💳 /banklogs – Walkthroughs and log shops\n"
-        "🎓 /mentorship – Learn 1-on-1 (mock)\n"
-        "🧠 /faq – Learn the language\n"
-        "📜 /terms – Simulation disclaimer\n\n"
-        "DM @ScamsClub_Store if you need help."
-    )
+@dp.message_handler(commands=["start", "welcome"])
+async def welcome_command(message: types.Message):
+    if message.get_args() == "welcome" or message.text.startswith("/welcome"):
+        await message.answer(
+            "👋 Thanks for joining Scam’s Club Store 🏪\n\n"
+            "You now have access to:\n"
+            "📚 /methods – Explore simulated guides\n"
+            "🛠 /tools – OTP bots, spoofers, etc.\n"
+            "💳 /banklogs – Walkthroughs and log shops\n"
+            "🎓 /mentorship – Learn 1-on-1 (mock)\n"
+            "🧠 /faq – Learn the language\n"
+            "📜 /terms – Simulation disclaimer\n\n"
+            "DM @ScamsClub_Store if you need help."
+        )
 
 # 🚀 Launch
 if __name__ == "__main__":
