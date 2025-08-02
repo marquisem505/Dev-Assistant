@@ -1,1 +1,1 @@
-worker: python scamsclub_welcome.py
+worker: python dev_bot.py
