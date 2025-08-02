@@ -4,11 +4,7 @@ import difflib
 import requests
 from base64 import b64decode, b64encode
 from datetime import datetime
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -19,7 +15,7 @@ from telegram.ext import (
 )
 import openai
 
-# === 🔐 ENVIRONMENT CONFIG ===
+# === 🔐 ENVIRONMENT VARIABLES ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GITHUB_PAT = os.getenv("GITHUB_PAT")
@@ -38,12 +34,12 @@ BACKUP_DIR = "backups"
 if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
 
-# === 🧠 MEMORY MANAGEMENT ===
+# === 🧠 MEMORY FUNCTIONS ===
 def load_memory():
-    if not os.path.exists(MEMORY_PATH):
-        return {}
-    with open(MEMORY_PATH) as f:
-        return json.load(f)
+    if os.path.exists(MEMORY_PATH):
+        with open(MEMORY_PATH) as f:
+            return json.load(f)
+    return {}
 
 def save_memory(mem):
     with open(MEMORY_PATH, "w") as f:
@@ -51,18 +47,20 @@ def save_memory(mem):
 
 # === 📜 DEPLOY LOGGING ===
 def log_event(event, summary, file=TARGET_FILE, by="system"):
+    log = {}
     if os.path.exists(LOG_PATH):
         with open(LOG_PATH) as f:
             log = json.load(f)
-    else:
-        log = {}
     log[datetime.utcnow().isoformat()] = {
-        "event": event, "file": file, "summary": summary, "by": by
+        "event": event,
+        "file": file,
+        "summary": summary,
+        "by": by
     }
     with open(LOG_PATH, "w") as f:
         json.dump(log, f, indent=2)
 
-# === 💾 BACKUPS ===
+# === 💾 FILE SNAPSHOT ===
 def snapshot(code):
     timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
     path = f"{BACKUP_DIR}/{timestamp}_{TARGET_FILE}"
@@ -70,7 +68,7 @@ def snapshot(code):
         f.write(code)
     return path
 
-# === 🧠 GPT EDIT ===
+# === 🤖 GPT EDITOR ===
 async def ask_gpt(prompt):
     openai.api_key = OPENAI_API_KEY
     response = openai.chat.completions.create(
@@ -85,7 +83,7 @@ async def ask_gpt(prompt):
     start = next((i for i, l in enumerate(lines) if l.strip().startswith("import")), 0)
     return "\n".join(lines[start:])
 
-# === 📥 FETCH FROM GITHUB ===
+# === 📥 GITHUB INTEGRATION ===
 def get_file_contents():
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TARGET_FILE}"
     headers = {"Authorization": f"Bearer {GITHUB_PAT}"}
@@ -96,7 +94,7 @@ def push_to_github(new_code, sha):
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TARGET_FILE}"
     headers = {"Authorization": f"Bearer {GITHUB_PAT}"}
     body = {
-        "message": "auto-update via dev_bot",
+        "message": "Auto update via dev_bot",
         "content": b64encode(new_code.encode()).decode(),
         "sha": sha,
         "branch": BRANCH
@@ -110,28 +108,29 @@ def trigger_deploy():
     except:
         return False
 
-# === 🔄 INLINE DIFF PREVIEW ===
+# === 🧠 GPT INSTRUCTION HANDLER ===
 pending_diffs = {}
 
 async def handle_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("Not authorized.")
+        return await update.message.reply_text("❌ Not authorized.")
     prompt = update.message.text.strip()
     old_code, sha = get_file_contents()
     snapshot(old_code)
+
     memory = load_memory()
     history = memory.get("nowbot", {}).get("history", [])
     full_prompt = f"{old_code}\n\nUpdate this according to:\n{prompt}\n\nHistory:\n{json.dumps(history[-5:], indent=2)}"
     new_code = await ask_gpt(full_prompt)
 
-    # Diff preview
     diff = difflib.unified_diff(
         old_code.splitlines(), new_code.splitlines(),
         fromfile="before", tofile="after", lineterm=""
     )
-    diff_text = "\n".join(list(diff)[:50])  # Limit preview
+    diff_text = "\n".join(list(diff)[:50])
+
     message = await update.message.reply_text(
-        f"🧠 Diff preview (first 50 lines):\n\n<pre>{diff_text}</pre>",
+        f"🧠 Diff preview:\n\n<pre>{diff_text}</pre>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Push", callback_data="confirm_push"),
@@ -145,17 +144,16 @@ async def handle_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "msg_id": message.message_id
     }
 
-# === ⏯ CALLBACK HANDLER ===
+# === 🔄 CALLBACK ===
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
     uid = str(query.from_user.id)
     if uid not in pending_diffs:
-        return await query.edit_message_text("No pending diff.")
+        return await query.edit_message_text("⚠️ No pending diff.")
     diff = pending_diffs[uid]
 
-    if data == "confirm_push":
+    if query.data == "confirm_push":
         push_to_github(diff["new_code"], diff["sha"])
         trigger_deploy()
         log_event("push", diff["summary"], by="admin")
@@ -164,30 +162,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Push cancelled.")
     del pending_diffs[uid]
 
-# === 🧪 DEBUG LOG FIX ===
+# === 🛠 DEBUG FROM ERROR LOG ===
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not os.path.exists(ERROR_LOG):
         return await update.message.reply_text("No error log found.")
     with open(ERROR_LOG) as f:
         log = f.read()
     if not log.strip():
-        return await update.message.reply_text("✅ No crash logs found.")
+        return await update.message.reply_text("✅ No crash logs.")
     code, sha = get_file_contents()
-    prompt = f"{code}\n\nFix the bug based on this error:\n\n{log[-1000:]}"
+    prompt = f"{code}\n\nFix this error:\n{log[-1000:]}"
     new_code = await ask_gpt(prompt)
     push_to_github(new_code, sha)
     trigger_deploy()
-    log_event("debug", "Crash log fix via GPT", by="admin")
+    log_event("debug", "Crash fix via GPT", by="admin")
     await update.message.reply_text("✅ Debugged, pushed & deployed.")
 
-# === 🔄 OTHER COMMANDS ===
+# === 🧱 SNAPSHOT + ROLLBACK ===
 async def rollback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = update.message.text.strip().split(" ")
     if len(parts) != 2:
         return await update.message.reply_text("Usage: /rollback filename")
     file = os.path.join(BACKUP_DIR, parts[1])
     if not os.path.exists(file):
-        return await update.message.reply_text("File not found.")
+        return await update.message.reply_text("❌ File not found.")
     with open(file) as f:
         rollback_code = f.read()
     _, sha = get_file_contents()
@@ -199,11 +197,12 @@ async def rollback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def snapshot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code, _ = get_file_contents()
     path = snapshot(code)
-    await update.message.reply_text(f"📦 Snapshot saved to {path}")
+    await update.message.reply_text(f"📦 Snapshot saved to `{path}`", parse_mode="Markdown")
 
+# === ✅ LOG + HEALTH ===
 async def deploylog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not os.path.exists(LOG_PATH):
-        return await update.message.reply_text("No log found.")
+        return await update.message.reply_text("No logs.")
     with open(LOG_PATH) as f:
         logs = json.load(f)
     lines = [f"{k} - {v['event']} by {v['by']}: {v['summary']}" for k, v in list(logs.items())[-5:]]
@@ -218,9 +217,9 @@ async def healthcheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ dev_bot healthy")
 
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Dev Assistant ready to write code on command.")
+    await update.message.reply_text("👋 Dev Assistant ready.")
 
-# === 🚀 BOOTSTRAP ===
+# === 🏁 LAUNCH ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("hello", hello))
