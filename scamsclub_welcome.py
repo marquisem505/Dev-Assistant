@@ -16,24 +16,22 @@ bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # ✅ Trigger when new user joins group
-@dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
-async def welcome_new_members(message: types.Message):
-    for new_user in message.new_chat_members:
-        if message.chat.id != FREE_GROUP_ID:
-            return
+@dp.chat_join_request_handler()
+async def handle_join_request(join_request: types.ChatJoinRequest):
+    user = join_request.from_user
 
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("📩 Start Here", url="https://t.me/ScamsClub_Bot?start=welcome")
-        )
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("📩 Start Here", url="https://t.me/ScamsClub_Bot?start=welcome")
+    )
 
-        welcome_text = (
-            f"👋 Welcome <b>{new_user.full_name}</b> to <b>Scam’s Club 🏪</b>\n\n"
-            "We share simulations of tools, walkthroughs, and methods (for educational use only).\n\n"
-            "🔒 Want full access to Scam’s Club Plus?\n"
-            "Click below to get started:"
-        )
+    await bot.send_message(
+        chat_id=user.id,
+        text=f"👋 Welcome <b>{user.full_name}</b> to <b>Scam’s Club 🏪</b>!\n\n"
+             "Tap below to learn about Scam’s Club Plus access:",
+        reply_markup=keyboard
+    )
 
-        await message.answer(welcome_text, reply_markup=keyboard)
+    await bot.approve_chat_join_request(chat_id=join_request.chat.id, user_id=user.id)
 
 # DM-only /welcome handler
 @dp.message_handler(commands=["welcome"])
