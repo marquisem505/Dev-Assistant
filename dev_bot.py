@@ -35,7 +35,8 @@ MEMORY_PATH = "memory.json"
 LOG_PATH = "deploy_log.json"
 ERROR_LOG = "error_log.txt"
 BACKUP_DIR = "backups"
-os.makedirs(BACKUP_DIR, exist_ok=True)
+if not os.path.exists(BACKUP_DIR):
+    os.makedirs(BACKUP_DIR)
 
 # === 🧠 MEMORY MANAGEMENT ===
 def load_memory():
