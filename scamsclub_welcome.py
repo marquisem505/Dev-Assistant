@@ -56,7 +56,7 @@ async def handle_new_members(message: types.Message):
             "Click below to get started:"
         )
 
-        await message.answer(welcome_text, reply_markup=keyboard)
+        await message.answer(welcome_text, reply_markup=keyboard
     )
 
 # 🚀 Launch the bot
