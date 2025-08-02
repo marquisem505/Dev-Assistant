@@ -226,6 +226,8 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === 🏁 LAUNCH ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Handlers
     app.add_handler(CommandHandler("hello", hello))
     app.add_handler(CommandHandler("debug", debug))
     app.add_handler(CommandHandler("rollback", rollback))
@@ -234,4 +236,10 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("healthcheck", healthcheck))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instruction))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.run_polling()
+
+    # ✅ Use webhook, not polling
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", "8080")),
+        webhook_url=f"{RAILWAY_DEPLOY_URL}/telegram-webhook"
+    )
