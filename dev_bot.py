@@ -23,7 +23,7 @@ REPO_OWNER = os.getenv("REPO_OWNER")
 REPO_NAME = os.getenv("REPO_NAME")
 TARGET_FILE = os.getenv("TARGET_FILE", "now_bot.py")
 BRANCH = os.getenv("BRANCH", "main")
-RAILWAY_DEPLOY_URL = "https://devbotassistant.up.railway.app"
+RAILWAY_DEPLOY_URL = os.getenv("RAILWAY_DEPLOY_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # === 📁 FILE PATHS ===
