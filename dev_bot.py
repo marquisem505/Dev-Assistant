@@ -1,11 +1,14 @@
 import os
 import json
-import requests
-import openai
 import difflib
-from base64 import b64encode, b64decode
+import requests
+from base64 import b64decode, b64encode
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -14,247 +17,217 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+import openai
 
-# === 🔐 CONFIG ===
-BOT_TOKEN = "8497059006:AAGwlC2Rg4XcVdakNZ15WG2abNuwsPkaZmM"
-ADMIN_ID = 6967780222
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# === 🔐 ENVIRONMENT CONFIG ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-MEMORY_FILE = "memory.json"
+REPO_OWNER = os.getenv("REPO_OWNER")
+REPO_NAME = os.getenv("REPO_NAME")
+TARGET_FILE = os.getenv("TARGET_FILE", "now_bot.py")
+BRANCH = os.getenv("BRANCH", "main")
+RAILWAY_DEPLOY_URL = "https://devbotassistant.up.railway.app"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-repo_map = {
-    "nowbot": {
-        "repo_owner": "marquisem505",
-        "repo_name": "scams-plus-subscription-bot",
-        "target_file": "now_bot.py",
-        "railway_url": "https://scamsclub.store"
-    },
-    "devbot": {
-        "repo_owner": "marquisem505",
-        "repo_name": "scams-plus-dev-bot",
-        "target_file": "dev_bot.py",
-        "railway_url": "https://your-dev-railway-url.com"
-    }
-}
+# === 📁 FILE PATHS ===
+MEMORY_PATH = "memory.json"
+LOG_PATH = "deploy_log.json"
+ERROR_LOG = "error_log.txt"
+BACKUP_DIR = "backups"
+os.makedirs(BACKUP_DIR, exist_ok=True)
 
-pending_changes = {}
-
-# === MEMORY ===
+# === 🧠 MEMORY MANAGEMENT ===
 def load_memory():
-    if not os.path.exists(MEMORY_FILE):
-        return {"nowbot": [], "devbot": []}
-    with open(MEMORY_FILE, "r") as f:
+    if not os.path.exists(MEMORY_PATH):
+        return {}
+    with open(MEMORY_PATH) as f:
         return json.load(f)
 
 def save_memory(mem):
-    with open(MEMORY_FILE, "w") as f:
+    with open(MEMORY_PATH, "w") as f:
         json.dump(mem, f, indent=2)
 
-def append_memory(bot_key, role, content):
-    mem = load_memory()
-    mem[bot_key].append({
-        "role": role,
-        "content": content,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-    mem[bot_key] = mem[bot_key][-10:]
-    save_memory(mem)
+# === 📜 DEPLOY LOGGING ===
+def log_event(event, summary, file=TARGET_FILE, by="system"):
+    if os.path.exists(LOG_PATH):
+        with open(LOG_PATH) as f:
+            log = json.load(f)
+    else:
+        log = {}
+    log[datetime.utcnow().isoformat()] = {
+        "event": event, "file": file, "summary": summary, "by": by
+    }
+    with open(LOG_PATH, "w") as f:
+        json.dump(log, f, indent=2)
 
-# === GITHUB ===
-def get_file(owner, repo, filepath):
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filepath}"
-    headers = {"Authorization": f"Bearer {GITHUB_PAT}"}
-    res = requests.get(url, headers=headers).json()
-    return b64decode(res["content"]).decode(), res["sha"]
+# === 💾 BACKUPS ===
+def snapshot(code):
+    timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    path = f"{BACKUP_DIR}/{timestamp}_{TARGET_FILE}"
+    with open(path, "w") as f:
+        f.write(code)
+    return path
 
-def push_file(owner, repo, filepath, new_code, sha):
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filepath}"
+# === 🧠 GPT EDIT ===
+async def ask_gpt(prompt):
+    openai.api_key = OPENAI_API_KEY
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Return raw Python code only. No markdown."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    content = response.choices[0].message.content
+    lines = content.splitlines()
+    start = next((i for i, l in enumerate(lines) if l.strip().startswith("import")), 0)
+    return "\n".join(lines[start:])
+
+# === 📥 FETCH FROM GITHUB ===
+def get_file_contents():
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TARGET_FILE}"
     headers = {"Authorization": f"Bearer {GITHUB_PAT}"}
-    payload = {
-        "message": "Auto update from Dev Assistant",
+    r = requests.get(url, headers=headers)
+    return b64decode(r.json()["content"]).decode(), r.json()["sha"]
+
+def push_to_github(new_code, sha):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TARGET_FILE}"
+    headers = {"Authorization": f"Bearer {GITHUB_PAT}"}
+    body = {
+        "message": "auto-update via dev_bot",
         "content": b64encode(new_code.encode()).decode(),
         "sha": sha,
-        "branch": "main"
+        "branch": BRANCH
     }
-    return requests.put(url, headers=headers, json=payload).ok
+    return requests.put(url, headers=headers, json=body).status_code == 200
 
-def deploy(railway_url):
+def trigger_deploy():
     try:
-        res = requests.post(f"{railway_url}/__rebuild", timeout=10)
+        res = requests.post(f"{RAILWAY_DEPLOY_URL}/__rebuild", timeout=10)
         return res.status_code in [200, 204]
     except:
         return False
 
-# === GPT WRAPPERS ===
-async def ask_gpt_code(bot_key, current_code, prompt):
-    memory = load_memory()[bot_key][-6:]
-    messages = [
-        {"role": "system", "content": f"You're a senior Python developer working on {bot_key}. ONLY return raw .py code. No markdown or comments."},
-        *[{"role": m["role"], "content": m["content"]} for m in memory],
-        {"role": "user", "content": f"This is the code:\n\n{current_code}\n\nMake this change:\n\n{prompt}"}
-    ]
-    res = openai.chat.completions.create(model="gpt-4", messages=messages, temperature=0.3)
-    raw = res.choices[0].message.content
-    lines = raw.splitlines()
-    start = next((i for i, l in enumerate(lines) if l.strip().startswith("import")), 0)
-    cleaned = "\n".join(lines[start:])
-    return cleaned
+# === 🔄 INLINE DIFF PREVIEW ===
+pending_diffs = {}
 
-async def ask_gpt_chat(prompt, history):
-    messages = [
-        {"role": "system", "content": "You are a helpful dev assistant."},
-        *[{"role": m["role"], "content": m["content"]} for m in history[-10:]],
-        {"role": "user", "content": prompt}
-    ]
-    res = openai.chat.completions.create(model="gpt-4", messages=messages, temperature=0.7)
-    return res.choices[0].message.content
+async def handle_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return await update.message.reply_text("Not authorized.")
+    prompt = update.message.text.strip()
+    old_code, sha = get_file_contents()
+    snapshot(old_code)
+    memory = load_memory()
+    history = memory.get("nowbot", {}).get("history", [])
+    full_prompt = f"{old_code}\n\nUpdate this according to:\n{prompt}\n\nHistory:\n{json.dumps(history[-5:], indent=2)}"
+    new_code = await ask_gpt(full_prompt)
 
-# === DEV INSTRUCTION ===
-async def handle_code_edit_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
-    target, prompt = text.split(":", 1)
-    target, prompt = target.strip().lower(), prompt.strip()
-    config = repo_map[target]
-    current_code, sha = get_file(config["repo_owner"], config["repo_name"], config["target_file"])
-    new_code = await ask_gpt_code(target, current_code, prompt)
-
-    if "import" not in new_code or "def " not in new_code:
-        await update.message.reply_text("🚨 GPT output doesn't look like code. Aborted.")
-        return
-
-    diff = list(difflib.unified_diff(current_code.splitlines(), new_code.splitlines(), fromfile="before.py", tofile="after.py", lineterm=""))
-    preview = "\n".join(diff[:40]) + ("\n... (truncated)" if len(diff) > 40 else "")
-    pending_changes[update.effective_user.id] = {
-        "code": new_code, "sha": sha, "config": config,
-        "prompt": prompt, "bot_key": target
-    }
-
-    await update.message.reply_text(
-        f"🧠 *Diff Preview:*\n```diff\n{preview}\n```",
-        parse_mode="Markdown",
+    # Diff preview
+    diff = difflib.unified_diff(
+        old_code.splitlines(), new_code.splitlines(),
+        fromfile="before", tofile="after", lineterm=""
+    )
+    diff_text = "\n".join(list(diff)[:50])  # Limit preview
+    message = await update.message.reply_text(
+        f"🧠 Diff preview (first 50 lines):\n\n<pre>{diff_text}</pre>",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Push & Deploy", callback_data="push_confirm")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="push_cancel")]
+            [InlineKeyboardButton("✅ Push", callback_data="confirm_push"),
+             InlineKeyboardButton("❌ Cancel", callback_data="cancel_push")]
         ])
     )
+    pending_diffs[str(update.effective_user.id)] = {
+        "new_code": new_code,
+        "sha": sha,
+        "summary": prompt,
+        "msg_id": message.message_id
+    }
 
-# === CHAT MODE ===
-async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("⛔️ Unauthorized.")
-        return
-    await update.message.reply_text("🤔 Thinking...")
-    mem = load_memory()
-    reply = await ask_gpt_chat(prompt, mem["devbot"])
-    append_memory("devbot", "user", prompt)
-    append_memory("devbot", "assistant", reply)
-    await update.message.reply_text(reply[:4096])
-
-# === BUTTON CONFIRM ===
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === ⏯ CALLBACK HANDLER ===
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = pending_changes.get(query.from_user.id)
-    if not data:
-        await query.edit_message_text("❌ No pending change.")
-        return
+    data = query.data
+    uid = str(query.from_user.id)
+    if uid not in pending_diffs:
+        return await query.edit_message_text("No pending diff.")
+    diff = pending_diffs[uid]
 
-    if query.data == "push_cancel":
-        del pending_changes[query.from_user.id]
-        await query.edit_message_text("❌ Cancelled.")
-        return
-
-    if query.data == "push_confirm":
-        pushed = push_file(data["config"]["repo_owner"], data["config"]["repo_name"], data["config"]["target_file"], data["code"], data["sha"])
-        deployed = deploy(data["config"]["railway_url"])
-        status = "✅ Pushed and " + ("deployed!" if deployed else "failed to deploy.")
-        append_memory(data["bot_key"], "user", data["prompt"])
-        append_memory(data["bot_key"], "assistant", "Code updated and deployed.")
-        del pending_changes[query.from_user.id]
-        await query.edit_message_text(f"{status}\n📂 `{data['config']['target_file']}`\n📝 {data['prompt']}", parse_mode="Markdown")
-
-# === DEBUG CRASHED BOT ===
-async def debug_nowbot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("⛔️ Unauthorized.")
-
-    await update.message.reply_text("🛠 Reading crash log...")
-    try:
-        current_code, sha = get_file("marquisem505", "scams-plus-subscription-bot", "now_bot.py")
-        if not os.path.exists("error_log.txt"):
-            return await update.message.reply_text("✅ No crash log found.")
-
-        with open("error_log.txt", "r") as f:
-            error_log = f.read()
-
-        gpt = openai.chat.completions.create(
-            model="gpt-4",
-            temperature=0.2,
-            messages=[
-                {"role": "system", "content": "You're a Python bug fixer. Return only the corrected code starting with import. No explanation."},
-                {"role": "user", "content": f"""Here is broken code:\n\n{current_code}\n\nError:\n\n{error_log}"""}
-            ]
-        )
-        raw = gpt.choices[0].message.content
-        lines = raw.splitlines()
-        start = next((i for i, l in enumerate(lines) if l.strip().startswith("import")), 0)
-        new_code = "\n".join(lines[start:])
-
-        if "import" not in new_code or "def " not in new_code:
-            return await update.message.reply_text("🚨 GPT output is invalid. Aborting.")
-
-        diff = list(difflib.unified_diff(current_code.splitlines(), new_code.splitlines(), fromfile="before.py", tofile="after.py", lineterm=""))
-        preview = "\n".join(diff[:40]) + ("\n... (truncated)" if len(diff) > 40 else "")
-
-        pending_changes[update.effective_user.id] = {
-            "code": new_code, "sha": sha,
-            "config": repo_map["nowbot"],
-            "prompt": "🔥 Auto-fix from crash log",
-            "bot_key": "nowbot"
-        }
-
-        await update.message.reply_text(
-            f"🚑 *Auto-Fix Suggestion:*\n```diff\n{preview}\n```",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Push Fix", callback_data="push_confirm")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="push_cancel")]
-            ])
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Debug failed: {e}")
-
-# === MEMORY CHECK ===
-async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mem = load_memory()
-    out = ""
-    for bot, entries in mem.items():
-        out += f"🧠 *{bot} memory:*\n"
-        for m in entries[-3:]:
-            out += f"• {m['role']}: {m['content'][:100]}\n"
-        out += "\n"
-    await update.message.reply_text(out[:4096], parse_mode="Markdown")
-
-# === MAIN ROUTER ===
-async def main_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("⛔️ Unauthorized.")
-
-    if ":" in text and text.split(":")[0].lower() in repo_map:
-        await handle_code_edit_instruction(update, context, text)
+    if data == "confirm_push":
+        push_to_github(diff["new_code"], diff["sha"])
+        trigger_deploy()
+        log_event("push", diff["summary"], by="admin")
+        await query.edit_message_text("✅ Pushed & deployed.")
     else:
-        await handle_conversation(update, context, text)
+        await query.edit_message_text("❌ Push cancelled.")
+    del pending_diffs[uid]
 
-# === /hello ===
+# === 🧪 DEBUG LOG FIX ===
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not os.path.exists(ERROR_LOG):
+        return await update.message.reply_text("No error log found.")
+    with open(ERROR_LOG) as f:
+        log = f.read()
+    if not log.strip():
+        return await update.message.reply_text("✅ No crash logs found.")
+    code, sha = get_file_contents()
+    prompt = f"{code}\n\nFix the bug based on this error:\n\n{log[-1000:]}"
+    new_code = await ask_gpt(prompt)
+    push_to_github(new_code, sha)
+    trigger_deploy()
+    log_event("debug", "Crash log fix via GPT", by="admin")
+    await update.message.reply_text("✅ Debugged, pushed & deployed.")
+
+# === 🔄 OTHER COMMANDS ===
+async def rollback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.strip().split(" ")
+    if len(parts) != 2:
+        return await update.message.reply_text("Usage: /rollback filename")
+    file = os.path.join(BACKUP_DIR, parts[1])
+    if not os.path.exists(file):
+        return await update.message.reply_text("File not found.")
+    with open(file) as f:
+        rollback_code = f.read()
+    _, sha = get_file_contents()
+    push_to_github(rollback_code, sha)
+    trigger_deploy()
+    log_event("rollback", f"Rollback from {parts[1]}")
+    await update.message.reply_text("✅ Rolled back and deployed.")
+
+async def snapshot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code, _ = get_file_contents()
+    path = snapshot(code)
+    await update.message.reply_text(f"📦 Snapshot saved to {path}")
+
+async def deploylog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not os.path.exists(LOG_PATH):
+        return await update.message.reply_text("No log found.")
+    with open(LOG_PATH) as f:
+        logs = json.load(f)
+    lines = [f"{k} - {v['event']} by {v['by']}: {v['summary']}" for k, v in list(logs.items())[-5:]]
+    await update.message.reply_text("\n".join(lines))
+
+async def healthcheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if os.path.exists(ERROR_LOG):
+        with open(ERROR_LOG) as f:
+            err = f.read()
+        if err.strip():
+            return await update.message.reply_text(f"⚠️ Crash:\n\n{err[-1000:]}")
+    await update.message.reply_text("✅ dev_bot healthy")
+
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Dev Assistant is online and ready.")
+    await update.message.reply_text("👋 Dev Assistant ready to write code on command.")
 
-# === INIT ===
+# === 🚀 BOOTSTRAP ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("hello", hello))
-    app.add_handler(CommandHandler("debug", debug_nowbot))
-    app.add_handler(CommandHandler("memory", memory_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_router))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CommandHandler("debug", debug))
+    app.add_handler(CommandHandler("rollback", rollback))
+    app.add_handler(CommandHandler("snapshot", snapshot_cmd))
+    app.add_handler(CommandHandler("deploylog", deploylog))
+    app.add_handler(CommandHandler("healthcheck", healthcheck))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instruction))
+    app.add_handler(CallbackQueryHandler(handle_callback))
     app.run_polling()
