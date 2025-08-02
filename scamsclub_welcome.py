@@ -39,18 +39,9 @@ async def handle_new_member(event: types.ChatMemberUpdated):
         await bot.send_message(chat_id=event.chat.id, text=welcome_text, reply_markup=keyboard)
 
 # 💬 Handle /welcome command in private DM
-@dp.message_handler(commands=["welcome"])
-async def welcome_command(message: types.Message):
-    await message.answer(
-        "👋 Thanks for joining Scam’s Club Store 🏪\n\n"
-        "You now have access to:\n"
-        "📚 /methods – Explore simulated guides\n"
-        "🛠 /tools – OTP bots, spoofers, etc.\n"
-        "💳 /banklogs – Walkthroughs and log shops\n"
-        "🎓 /mentorship – Learn 1-on-1 (mock)\n"
-        "🧠 /faq – Learn the language\n"
-        "📜 /terms – Simulation disclaimer\n\n"
-        "DM @ScamsClub_Store if you need help."
+@dp.message_handler(commands=["ping"])
+async def ping(message: types.Message):
+    await message.answer("✅ I'm alive and running!")
     )
 
 # 🚀 Run bot
