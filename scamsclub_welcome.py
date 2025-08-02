@@ -42,7 +42,7 @@ async def handle_new_member(event: types.ChatMemberUpdated):
 @dp.message_handler(commands=["ping"])
 async def ping(message: types.Message):
     await message.answer("✅ I'm alive and running!")
-    )
+    
 
 # 🚀 Run bot
 if __name__ == "__main__":
