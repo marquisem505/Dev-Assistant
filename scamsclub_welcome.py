@@ -11,17 +11,16 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FREE_GROUP_ID = int(os.getenv("FREE_GROUP_ID"))
 
-# Initialize bot and dispatcher
+# Initialize bot
 bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # 👋 Handle new members joining the group
-@dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
-async def on_user_joined(message: types.Message):
-    if message.chat.id != FREE_GROUP_ID:
-        return
+@dp.chat_member_handler()
+async def handle_new_member(event: types.ChatMemberUpdated):
+    if event.chat.id == FREE_GROUP_ID and event.new_chat_member.status == "member":
+        user = event.new_chat_member.user
 
-    for user in message.new_chat_members:
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
             InlineKeyboardButton(
@@ -29,36 +28,31 @@ async def on_user_joined(message: types.Message):
                 url="https://t.me/ScamsClub_Bot?start=welcome"
             )
         )
+
         welcome_text = (
             f"👋 Welcome <b>{user.full_name}</b> to <b>Scam’s Club 🏪</b>\n\n"
             "We share simulations of tools, walkthroughs, and methods (for educational use only).\n\n"
             "🔒 Want full access to Scam’s Club Plus?\n"
             "Click below to get started:"
         )
-        await message.answer(welcome_text, reply_markup=keyboard)
+
+        await bot.send_message(chat_id=event.chat.id, text=welcome_text, reply_markup=keyboard)
 
 # 💬 Handle /welcome command in private DM
-@dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
-async def handle_new_members(message: types.Message):
-    for user in message.new_chat_members:
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(
-            InlineKeyboardButton(
-                text="📩 Start Here",
-                url="https://t.me/ScamsClub_Bot?start=welcome"
-            )
-        )
-
-        welcome_text = (
-            f"👋 Welcome <b>{user.full_name}</b> to <b>Scam’s Club 🏪</b>\n\n"
-            "We share simulations of tools, walkthroughs, and methods (for educational use only).\n\n"
-            "🔒 Want full access to Scam’s Club Plus?\n"
-            "Click below to get started:"
-        )
-
-        await message.answer(welcome_text, reply_markup=keyboard
+@dp.message_handler(commands=["welcome"])
+async def welcome_command(message: types.Message):
+    await message.answer(
+        "👋 Thanks for joining Scam’s Club Store 🏪\n\n"
+        "You now have access to:\n"
+        "📚 /methods – Explore simulated guides\n"
+        "🛠 /tools – OTP bots, spoofers, etc.\n"
+        "💳 /banklogs – Walkthroughs and log shops\n"
+        "🎓 /mentorship – Learn 1-on-1 (mock)\n"
+        "🧠 /faq – Learn the language\n"
+        "📜 /terms – Simulation disclaimer\n\n"
+        "DM @ScamsClub_Store if you need help."
     )
 
-# 🚀 Launch the bot
+# 🚀 Run bot
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
