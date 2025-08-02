@@ -16,7 +16,7 @@ bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # 👋 Handle new members joining the group
-@dp.chat_member_handler()
+@dp.my_chat_member_handler()
 async def handle_new_member(event: types.ChatMemberUpdated):
     if event.chat.id == FREE_GROUP_ID and event.new_chat_member.status == "member":
         user = event.new_chat_member.user
